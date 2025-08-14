@@ -1,0 +1,34 @@
+{
+    "buttons": [
+        {
+            "label": "Lock",
+            "action": "swaylock",
+            "text": "Lock"
+        },
+        {
+            "label": "Hibernate",
+            "action": "systemctl hibernate",
+            "text": "Hibernate"
+        },
+        {
+            "label": "Logout",
+            "action": "hyprctl dispatch exit 0",
+            "text": "Logout"
+        },
+        {
+            "label": "Shutdown",
+            "action": "systemctl poweroff",
+            "text": "Shutdown"
+        },
+        {
+            "label": "Suspend",
+            "action": "systemctl suspend",
+            "text": "Suspend"
+        },
+        {
+            "label": "Reboot",
+            "action": "systemctl reboot",
+            "text": "Reboot"
+        }
+    ]
+}

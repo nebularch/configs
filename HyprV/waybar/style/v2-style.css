@@ -1,0 +1,179 @@
+* {
+    border: none;
+    border-radius: 0;
+    font-family: "JetBrainsMono Nerd Font";
+    font-weight: bold;
+    font-size: 16px;
+    min-height: 0;
+}
+
+window#waybar {
+    background: rgba(21, 18, 27, 0);
+    color: #2b2b2c;
+}
+
+tooltip {
+    background: #e7e7ec;
+    opacity: 0.8;
+    border-radius: 10px;
+    border-width: 2px;
+    border-style: solid;
+    border-color: #11111b;
+}
+
+tooltip label {
+    color: #2b2b2c;
+}
+
+#workspaces button {
+    padding: 4px;
+    color: #313244;
+    margin-right: 5px;
+}
+
+#workspaces button.active {
+    color: #a6adc8;
+}
+
+#workspaces button.focused {
+    color: #a6adc8;
+    background: #eba0ac;
+    border-radius: 10px;
+}
+
+#workspaces button.urgent {
+    color: #11111b;
+    background: #a6e3a1;
+    border-radius: 10px;
+}
+
+#workspaces button:hover {
+    background: #11111b;
+    color: #cdd6f4;
+    border-radius: 10px;
+}
+
+#custom-launch_wofi,
+#custom-lock_screen,
+#custom-light_dark,
+#custom-power_btn,
+#custom-power_profile,
+#custom-weather,
+#custom-myhyprv,
+#window,
+#cpu,
+#disk,
+#custom-updates,
+#memory,
+#clock,
+#battery,
+#pulseaudio,
+#network,
+#tray,
+#temperature,
+#workspaces,
+#backlight {
+    background: #e7e7ec;
+    opacity: 0.8;
+    padding: 0px 10px;
+    margin: 3px 0px;
+    margin-top: 10px;
+    border: 0px;
+    transition: all 0.2s ease-in-out;
+}
+
+#tray, #custom-lock_screen, #temperature, #backlight, #custom-launch_wofi, #cpu {
+    border-radius: 10px 0px 0px 10px;
+}
+
+#custom-light_dark, #custom-power_btn, #workspaces, #pulseaudio.microphone, #battery, #disk {
+    border-radius: 0px 10px 10px 0px;
+    margin-right: 10px;
+}
+
+#temperature.critical {
+    color: #e92d4d;
+}
+
+#workspaces {
+    border-radius: 10px;
+    padding-left: 10px;
+    padding-right: 10px;
+    margin-left: 15px;
+    margin-right: 10px;
+}
+
+#custom-light_dark, #custom-myhyprv {
+    border-radius: 10px;
+    margin-left: 15px;
+    margin-right: 10px;
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+#custom-power_profile {
+    color: #1d7715;
+    border-left: 0px;
+    border-right: 0px;
+}
+
+#window {
+    border-radius: 10px;
+    margin-left: 20px;
+    margin-right: 20px;
+}
+
+#custom-launch_wofi {
+    color: #407cdd;
+    margin-left: 10px;
+    border-right: 0px;
+}
+
+#pulseaudio {
+    color: #407cdd;
+    border-left: 0px;
+    border-right: 0px;
+}
+
+#pulseaudio.microphone {
+    color: #ad6bfd;
+    border-left: 0px;
+    border-right: 0px;
+}
+
+#battery {
+    color: #1d7715;
+    border-left: 0px;
+}
+
+/* ✨ Tray style upgrade */
+#tray {
+    background: linear-gradient(135deg, rgba(231, 231, 236, 0.6), rgba(255, 255, 255, 0.6));
+    border-radius: 10px;
+    border: 1px solid rgba(64, 124, 221, 0.3);
+    box-shadow: 0 0 6px rgba(0, 0, 0, 0.2);
+    padding: 2px 10px;
+    margin-right: 8px;
+    margin-left: 4px;
+    transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+/* ✨ Hover effect for tray — subtle glow */
+#tray:hover {
+    background: rgba(255, 255, 255, 0.85);
+    box-shadow: 0 0 10px rgba(64, 124, 221, 0.6);
+}
+
+/* 🌠 Smooth transitions for all modules */
+.modules-left > *,
+.modules-center > *,
+.modules-right > * {
+    transition: all 0.2s ease-in-out;
+}
+
+/* 🌤 Optional hover glow */
+.modules-left > *:hover,
+.modules-center > *:hover,
+.modules-right > *:hover {
+    background-color: rgba(0, 0, 0, 0.05);
+}

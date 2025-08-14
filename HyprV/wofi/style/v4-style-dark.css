@@ -1,0 +1,117 @@
+/* Frosted Glass Window (macOS Spotlight-inspired effect) */
+window {
+    margin: 0px;
+    border: none;
+    background: rgba(0, 0, 0, 0.3);  /* Semi-transparent background */
+    border-radius: 20px;  /* Rounded corners */
+    backdrop-filter: blur(10px);  /* Frosted glass blur effect */
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);  /* Soft shadow for depth */
+}
+
+/* Input Field */
+#input {
+    padding: 4px;
+    margin: 4px;
+    padding-left: 20px;
+    border: none;
+    color: #e0e0e0;  /* Light gray text */
+    font-weight: bold;
+    background-color: rgba(40, 40, 40, 0.8);  /* Semi-transparent dark gray background */
+    outline: none;
+    border-radius: 15px;  /* Rounded corners */
+    margin: 10px;
+    margin-bottom: 2px;
+    transition: all 0.2s ease-in-out;
+}
+
+#input:focus {
+    background-color: rgba(60, 60, 60, 0.9);  /* Lighter gray on focus */
+    border: none;
+    margin-bottom: 0px;
+}
+
+/* Inner Box */
+#inner-box {
+    margin: 4px;
+    border: none;
+    color: #e0e0e0;  /* Light gray text */
+    font-weight: bold;
+    background-color: rgba(40, 40, 40, 0.8);  /* Semi-transparent dark gray */
+    border-radius: 15px;
+    backdrop-filter: blur(8px);  /* Blur effect on inner box */
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);  /* Soft shadow */
+}
+
+/* Outer Box */
+#outer-box {
+    margin: 0px;
+    border: none;
+    border-radius: 20px;
+    background-color: rgba(40, 40, 40, 0.8);  /* Transparent dark gray */
+    backdrop-filter: blur(8px);  /* Frosted blur effect */
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);  /* Soft shadow */
+}
+
+/* Scrollbar */
+#scroll {
+    margin-top: 5px;
+    border: none;
+    border-radius: 15px;
+    margin-bottom: 5px;
+    scrollbar-width: thin;
+    scrollbar-color: #b0b0b0 #2c2c2c;  /* Light gray scrollbar with dark background */
+}
+
+/* Monochrome Icons */
+#img {
+    filter: grayscale(100%) brightness(100%);  /* Convert icons to full monochrome (black and white) */
+    transition: filter 0.3s ease-in-out;  /* Smooth transition for hover effects */
+}
+
+#img:hover {
+    filter: grayscale(100%) brightness(120%);  /* Slightly brighter on hover */
+}
+
+/* Selected Icons */
+#img:selected {
+    filter: grayscale(100%) brightness(120%);  /* Brighter when selected */
+}
+
+/* Text-Based Icons (Monochrome Text) */
+#text {
+    color: #e0e0e0;  /* Light gray text */
+    transition: color 0.3s ease-in-out;
+}
+
+#text:hover {
+    color: #ffffff;  /* Brighter white text on hover */
+}
+
+/* Entry Field */
+#entry {
+    margin: 0px 0px;
+    border: none;
+    border-radius: 15px;
+    background-color: transparent;
+}
+
+#entry:selected {
+    margin: 0px 0px;
+    border: none;
+    border-radius: 15px;
+    background-color: rgba(60, 60, 60, 0.8);  /* Darker background when selected */
+}
+
+#entry:hover {
+    background-color: rgba(50, 50, 50, 0.8);  /* Darker gray on hover */
+    transition: background-color 0.2s ease-in-out;
+}
+
+/* Input Field Transition */
+#input {
+    transition: all 0.2s ease-in-out;
+}
+
+#input:focus {
+    background-color: rgba(60, 60, 60, 0.9);  /* Lighter gray when focused */
+}
