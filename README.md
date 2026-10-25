@@ -50,4 +50,128 @@ These are practical analogies, not exact technical equivalents. Some components 
 You don't have to install every item just because it appears on the menu.
 
 - **A minimal plate:** Hyprland, a terminal, a launcher, and only the essential tools you need.
-- **A comfortable plate:** Add Waybar, notifications, a file manager, audio controls, and Bluetooth
+- **A comfortable plate:** Add Waybar, notifications, a file manager, audio controls, and Bluetooth support.
+- **A fully loaded plate:** Add screenshot tools, themed login screens, custom fonts, power-profile switching, and the other utilities you want.
+
+These are examples, not strict installation profiles. Your hardware, workflow, and preferences determine what belongs on your plate.
+
+## How to choose your ingredients
+
+The following command represents the package selection used by this configuration.
+
+```bash
+yay -S hyprland kitty jq mako waybar-hyprland \
+  awww swaylock-effects wofi wlogout \
+  xdg-desktop-portal-hyprland swappy grim slurp thunar \
+  polkit-gnome python-requests pamixer pavucontrol \
+  brightnessctl bluez bluez-utils blueman \
+  network-manager-applet gvfs thunar-archive-plugin \
+  file-roller btop pacman-contrib starship \
+  ttf-jetbrains-mono-nerd noto-fonts-emoji \
+  lxappearance xfce4-settings sddm-git \
+  sddm-sugar-candy-git power-profiles-daemon
+```
+
+Here's how to read it:
+
+- `yay -S` asks `yay` to install the packages that follow.
+- Every package name is an ingredient you're asking to add to your system.
+- The `\` characters let the command continue onto the next line; they aren't package names.
+- You can remove packages you don't want, but first check whether the configuration or scripts rely on them.
+- You can add other compatible tools if they suit your workflow.
+
+**Important:** Removing a package from this command doesn't automatically remove its configuration, disable related modules, or replace its functionality. If you skip something, check for references to it in your Hyprland, Waybar, and other configuration files.
+
+## Before you serve
+
+This configuration was originally intended for a **clean, fresh Arch Linux installation on physical hardware**.
+
+Before installing:
+
+- Review the packages `yay` proposes before confirming.
+- Check that packages are available from your configured repositories or AUR sources.
+- Remember that Git-based packages and themed variants may change or become unavailable.
+- Check whether your hardware supports the features you want to use.
+- Back up existing configurations before replacing them.
+- Review installation scripts before allowing them to modify your system.
+
+This is a starting selection, not a universal recipe.
+
+## Installation
+
+### 1. Get the repository
+
+```bash
+git clone https://github.com/nebularch/configs.git
+cd configs
+```
+
+### 2. Review the installer
+
+The repository includes the `set-hypr` installation script.
+
+Inspect it before running:
+
+```bash
+less set-hypr
+```
+
+Review its package list, file-copy operations, configuration changes, and any commands that modify system settings. Follow the instructions provided by the script and run it only when you understand the changes it will make.
+
+You can also use the repository as a reference and install or configure the components manually.
+
+### 3. NVIDIA users
+
+NVIDIA setup depends on your GPU, kernel, driver, boot configuration, and installed packages.
+
+The original guide used the following commands as part of its NVIDIA setup:
+
+Install the relevant packages:
+
+```bash
+yay -S linux-headers nvidia-dkms qt5-wayland qt5ct \
+  libva libva-nvidia-driver-git
+```
+
+Configure the NVIDIA DRM option:
+
+```bash
+echo "options nvidia-drm modeset=1" | \
+  sudo tee /etc/modprobe.d/nvidia.conf
+```
+
+Verify the configuration:
+
+```bash
+cat /etc/modprobe.d/nvidia.conf
+```
+
+The expected setting in that original guide is:
+
+```text
+options nvidia-drm modeset=1
+```
+
+**Do not treat these commands as universal NVIDIA installation instructions.** Verify the current Arch Linux NVIDIA documentation and choose the appropriate driver and kernel configuration for your hardware before proceeding.
+
+The original guide also modified `/etc/mkinitcpio.conf`, added NVIDIA modules, generated an initramfs image, and rebooted. Those steps are not reproduced as a blind copy-and-paste procedure here because the correct initramfs and boot configuration depend on your system. Back up your configuration and confirm the correct procedure before making those changes.
+
+## Make it yours
+
+Configuration is not a monument. It is a conversation between the machine and the person using it.
+
+Change a keybinding. Remove a module. Try a different layout. Keep a backup before experimenting, and commit changes you want to preserve.
+
+If you find a better way to do something, make the improvement part of your setup.
+
+## A small note
+
+These configurations are a collection of choices, not universal rules. Your hardware, workflow, and preferences may differ.
+
+Take what helps. Leave what doesn't.
+
+The goal isn't to install the biggest plate.
+
+**The goal is to build a desktop that feels like yours.**
+
+Take what you need. Leave what you don't. Learn what each piece does. Then make it your own.
