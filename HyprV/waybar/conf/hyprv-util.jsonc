@@ -1,10 +1,16 @@
 {
+    "battery#mouse": {
+        "bat": "cx-mouse-battery",
+        "interval": 5,
+        "format": "󰍽 {capacity}%",
+        "format-charging": "󰍽  {capacity}%"
+    },
+
     "custom/myhyprv": {
-        //shows the current power profile and switches to next on click
         "exec": "~/.config/HyprV/hyprv_util",
-        "return-type" : "json",
-        "interval": 30,
-        "format": "{}",
+        "return-type": "json",
+        "format": "{text}",
+        "interval": 10,
         "on-click": "~/.config/HyprV/hyprv_util vswitch",
         "tooltip": true
     },
@@ -14,5 +20,4 @@
         "on-click": "~/.config/HyprV/waybar/scripts/baraction light",
         "tooltip": false
     }
-
 }

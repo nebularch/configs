@@ -1,0 +1,10 @@
+# Installer logs
+install.log
+
+# yay build directory
+/yay/
+
+# Editor temporary files
+*~
+*.swp
+*.swo
