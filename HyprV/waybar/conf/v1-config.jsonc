@@ -23,13 +23,14 @@
         "temperature",
         "custom/power_profile",
         "battery",
+        "battery#mouse",
         "custom/myhyprv",
         "custom/light_dark"
     ],
     
     "include": [
         "~/.config/HyprV/waybar/conf/mesu.jsonc",
-        "~/.config/HyprV/waybar/conf/asus-rog.jsonc",
+        "~/.config/HyprV/waybar/conf/power-profile.jsonc",
         "~/.config/HyprV/waybar/conf/hyprv-util.jsonc"
     ],
 
