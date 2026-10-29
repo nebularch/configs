@@ -86,7 +86,15 @@ CER="[\e[1;31mERROR\e[0m]"
 CAT="[\e[1;37mATTENTION\e[0m]"
 CWR="[\e[1;35mWARNING\e[0m]"
 CAC="[\e[1;33mACTION\e[0m]"
-INSTLOG="install.log"
+# Resolve the installer directory so logging works from any cwd.
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+INSTLOG="$SCRIPT_DIR/install.log"
+
+# Start a fresh log for each installer run.
+if ! : > "$INSTLOG"; then
+    printf 'ERROR: Cannot write installer log: %s\n' "$INSTLOG" >&2
+    exit 1
+fi
 
 ######
 # functions go here
@@ -110,7 +118,7 @@ install_software() {
     else
         # no package found so installing
         echo -en "$CNT - Now installing $1 ."
-        yay -S --noconfirm $1 &>> $INSTLOG &
+        yay -S --noconfirm $1 &>> "$INSTLOG" &
         show_progress $!
         # test to make sure package installed
         if yay -Q $1 &>> /dev/null ; then
@@ -168,10 +176,10 @@ read -rep $'[\e[1;33mACTION\e[0m] - Would you like to disable WiFi powersave? (y
 if [[ $WIFI == "Y" || $WIFI == "y" ]]; then
     LOC="/etc/NetworkManager/conf.d/wifi-powersave.conf"
     echo -e "$CNT - The following file has been created $LOC.\n"
-    echo -e "[connection]\nwifi.powersave = 2" | sudo tee -a $LOC &>> $INSTLOG
+    echo -e "[connection]\nwifi.powersave = 2" | sudo tee -a $LOC &>> "$INSTLOG"
     echo -en "$CNT - Restarting NetworkManager service, Please wait."
     sleep 2
-    sudo systemctl restart NetworkManager &>> $INSTLOG
+    sudo systemctl restart NetworkManager &>> "$INSTLOG"
     
     #wait for services to restore (looking at you DNS)
     for i in {1..6} 
@@ -187,9 +195,9 @@ fi
 #### Check for package manager ####
 if [ ! -f /sbin/yay ]; then  
     echo -en "$CNT - Configuering yay."
-    git clone https://aur.archlinux.org/yay.git &>> $INSTLOG
+    git clone https://aur.archlinux.org/yay.git &>> "$INSTLOG"
     cd yay
-    makepkg -si --noconfirm &>> ../$INSTLOG &
+    makepkg -si --noconfirm &>> "$INSTLOG" &
     show_progress $!
     if [ -f /sbin/yay ]; then
         echo -e "\e[1A\e[K$COK - yay configured"
@@ -197,7 +205,7 @@ if [ ! -f /sbin/yay ]; then
         
         # update the yay database
         echo -en "$CNT - Updating yay."
-        yay -Suy --noconfirm &>> $INSTLOG &
+        yay -Suy --noconfirm &>> "$INSTLOG" &
         show_progress $!
         echo -e "\e[1A\e[K$COK - yay updated."
     else
@@ -229,7 +237,7 @@ if [[ $INST == "Y" || $INST == "y" ]]; then
         # update config
         sudo sed -i 's/MODULES=()/MODULES=(nvidia nvidia_modeset nvidia_uvm nvidia_drm)/' /etc/mkinitcpio.conf
         sudo mkinitcpio --config /etc/mkinitcpio.conf --generate /boot/initramfs-custom.img
-        echo -e "options nvidia-drm modeset=1" | sudo tee -a /etc/modprobe.d/nvidia.conf &>> $INSTLOG
+        echo -e "options nvidia-drm modeset=1" | sudo tee -a /etc/modprobe.d/nvidia.conf &>> "$INSTLOG"
     fi
 
     # Install the correct hyprland version
@@ -244,17 +252,17 @@ if [[ $INST == "Y" || $INST == "y" ]]; then
 
     # Start the bluetooth service
     echo -e "$CNT - Starting the Bluetooth Service..."
-    sudo systemctl enable --now bluetooth.service &>> $INSTLOG
+    sudo systemctl enable --now bluetooth.service &>> "$INSTLOG"
     sleep 2
 
     # Enable the sddm login manager service
     echo -e "$CNT - Enabling the SDDM Service..."
-    sudo systemctl enable sddm &>> $INSTLOG
+    sudo systemctl enable sddm &>> "$INSTLOG"
     sleep 2
     
     # Clean out other portals
     echo -e "$CNT - Cleaning out conflicting xdg portals..."
-    yay -R --noconfirm xdg-desktop-portal-gnome xdg-desktop-portal-gtk &>> $INSTLOG
+    yay -R --noconfirm xdg-desktop-portal-gnome xdg-desktop-portal-gtk &>> "$INSTLOG"
 fi
 
 ### Copy Config Files ###
@@ -284,12 +292,12 @@ if [[ $CFG == "Y" || $CFG == "y" ]]; then
         DIRPATH=~/.config/$DIR
         if [ -d "$DIRPATH" ]; then 
             echo -e "$CAT - Config for $DIR located, backing up."
-            mv $DIRPATH $DIRPATH-back &>> $INSTLOG
+            mv $DIRPATH $DIRPATH-back &>> "$INSTLOG"
             echo -e "$COK - Backed up $DIR to $DIRPATH-back."
         fi
 
         # make new empty folders
-        mkdir -p $DIRPATH &>> $INSTLOG
+        mkdir -p $DIRPATH &>> "$INSTLOG"
     done
 
     # link up the config files
@@ -315,7 +323,7 @@ if [[ $CFG == "Y" || $CFG == "y" ]]; then
     sudo cp -R Extras/sdt /usr/share/sddm/themes/
     sudo chown -R $USER:$USER /usr/share/sddm/themes/sdt
     sudo mkdir /etc/sddm.conf.d
-    echo -e "[Theme]\nCurrent=sdt" | sudo tee -a /etc/sddm.conf.d/10-theme.conf &>> $INSTLOG
+    echo -e "[Theme]\nCurrent=sdt" | sudo tee -a /etc/sddm.conf.d/10-theme.conf &>> "$INSTLOG"
     WLDIR=/usr/share/wayland-sessions
     if [ -d "$WLDIR" ]; then
         echo -e "$COK - $WLDIR found"
@@ -350,16 +358,16 @@ fi
 read -rep $'[\e[1;33mACTION\e[0m] - For ASUS ROG Laptops - Would you like to install Asus ROG software support? (y,n) ' ROG
 if [[ $ROG == "Y" || $ROG == "y" ]]; then
     echo -e "$CNT - Adding Keys..."
-    sudo pacman-key --recv-keys 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
-    sudo pacman-key --finger 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
-    sudo pacman-key --lsign-key 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
-    sudo pacman-key --finger 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> $INSTLOG
+    sudo pacman-key --recv-keys 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> "$INSTLOG"
+    sudo pacman-key --finger 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> "$INSTLOG"
+    sudo pacman-key --lsign-key 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> "$INSTLOG"
+    sudo pacman-key --finger 8F654886F17D497FEFE3DB448B15A6B0E9A3FA35 &>> "$INSTLOG"
 
     LOC="/etc/pacman.conf"
     echo -e "$CNT - Updating $LOC with g14 repo."
-    echo -e "\n[g14]\nServer = https://arch.asus-linux.org" | sudo tee -a $LOC &>> $INSTLOG
+    echo -e "\n[g14]\nServer = https://arch.asus-linux.org" | sudo tee -a $LOC &>> "$INSTLOG"
     echo -e "$CNT - Update the system..."
-    sudo pacman -Suy --noconfirm &>> $INSTLOG
+    sudo pacman -Suy --noconfirm &>> "$INSTLOG"
 
     echo -e "$CNT - Installing ROG pacakges..."
     install_software asusctl
@@ -367,9 +375,9 @@ if [[ $ROG == "Y" || $ROG == "y" ]]; then
     install_software rog-control-center
 
     echo -e "$CNT - Activating ROG services..."
-    sudo systemctl enable --now power-profiles-daemon.service &>> $INSTLOG
+    sudo systemctl enable --now power-profiles-daemon.service &>> "$INSTLOG"
     sleep 2
-    sudo systemctl enable --now supergfxd &>> $INSTLOG
+    sudo systemctl enable --now supergfxd &>> "$INSTLOG"
     sleep 2
 
     # add the ROG keybinding file to the config
@@ -386,7 +394,7 @@ fi
 
 read -rep $'[\e[1;33mACTION\e[0m] - Would you like to start Hyprland now? (y,n) ' HYP
 if [[ $HYP == "Y" || $HYP == "y" ]]; then
-    exec sudo systemctl start sddm &>> $INSTLOG
+    exec sudo systemctl start sddm &>> "$INSTLOG"
 else
     exit
 fi
