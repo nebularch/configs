@@ -23,6 +23,7 @@ source "$INSTALLER_DIR/core/backup.sh"
 source "$INSTALLER_DIR/core/restore.sh"
 source "$INSTALLER_DIR/core/ui.sh"
 source "$INSTALLER_DIR/packages/manager.sh"
+source "$INSTALLER_DIR/strategies/manager.sh"
 
 installer_main() {
     printf '\n'
@@ -61,7 +62,15 @@ installer_main() {
         "Configure Starship?" INSTALLER_ENABLE_STARSHIP ||
         installer_die "Input cancelled while selecting Starship."
 
-    # Phase 4: Build and validate the package plan.
+    # Phase 4: Validate and display the selected configuration strategy.
+    if installer_strategy_plan; then
+        :
+    else
+        printf '\n[ERROR] Configuration strategy validation failed.\n' >&2
+        return 1
+    fi
+
+    # Phase 5: Build and validate the package plan.
     local package_plan_status
 
     if installer_prepare_package_plan \
