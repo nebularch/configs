@@ -1,0 +1,786 @@
+#!/usr/bin/env bash
+
+# HyprV Installer - Native Bash test suite.
+#
+# All filesystem tests run inside temporary HOME/state directories.
+# No real desktop configuration is modified.
+
+set -uo pipefail
+
+TEST_DIR="$(
+    cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &&
+    pwd
+)"
+
+INSTALLER_DIR="$(
+    cd -- "$TEST_DIR/.." &&
+    pwd
+)"
+
+# Load the real entry point without executing the installer.
+source "$INSTALLER_DIR/main.sh"
+
+TEST_ROOT="$(mktemp -d)" || exit 1
+trap 'rm -rf -- "$TEST_ROOT"' EXIT
+
+TESTS_PASSED=0
+TESTS_FAILED=0
+
+new_sandbox() {
+    local sandbox
+
+    sandbox="$(mktemp -d "$TEST_ROOT/case.XXXXXX")" || return 1
+
+    export HOME="$sandbox/home"
+    export XDG_STATE_HOME="$sandbox/state"
+
+    mkdir -p "$HOME" "$XDG_STATE_HOME" || return 1
+
+    unset INSTALLER_BACKUP_DIR
+}
+
+assert_true() {
+    if ! "$@"; then
+        printf '[FAIL] Assertion failed: %s\n' "$*" >&2
+        return 1
+    fi
+}
+
+assert_eq() {
+    local expected="$1"
+    local actual="$2"
+
+    if [[ "$expected" != "$actual" ]]; then
+        printf '[FAIL] Expected: <%s>\n' "$expected" >&2
+        printf '[FAIL] Actual:   <%s>\n' "$actual" >&2
+        return 1
+    fi
+}
+
+expect_failure() {
+    if "$@" >/dev/null 2>&1; then
+        printf '[FAIL] Expected command to fail: %s\n' "$*" >&2
+        return 1
+    fi
+}
+
+run_test() {
+    local name="$1"
+
+    printf '\n[TEST] %s\n' "$name"
+
+    if ( "$name" ); then
+        printf '[PASS] %s\n' "$name"
+        ((TESTS_PASSED += 1))
+    else
+        printf '[FAIL] %s\n' "$name"
+        ((TESTS_FAILED += 1))
+    fi
+}
+
+# --------------------------------------------------
+# UI tests
+# --------------------------------------------------
+
+test_prompt_yes() {
+    local status
+
+    if installer_prompt_yes_no "Test?" n <<<"y" 2>/dev/null; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 0 "$status"
+}
+
+test_prompt_no() {
+    local status
+
+    if installer_prompt_yes_no "Test?" y <<<"n" 2>/dev/null; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status"
+}
+
+test_prompt_default_yes() {
+    local status
+
+    if installer_prompt_yes_no "Test?" y <<<"" 2>/dev/null; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 0 "$status"
+}
+
+test_prompt_default_no() {
+    local status
+
+    if installer_prompt_yes_no "Test?" n <<<"" 2>/dev/null; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status"
+}
+
+test_prompt_invalid_then_yes() {
+    local status
+    local output
+
+    output="$(
+        installer_prompt_yes_no "Test?" n <<< $'maybe\ny' 2>&1
+    )" && status=0 || status=$?
+
+    assert_eq 0 "$status"
+    assert_true grep -q "Please answer yes or no" <<<"$output"
+}
+
+test_prompt_eof() {
+    local status
+
+    if installer_prompt_yes_no "Test?" n </dev/null 2>/dev/null; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 2 "$status"
+}
+
+test_option_yes() {
+    installer_set_yes_no_option "Enable feature?" FEATURE <<<"y" || return 1
+    assert_eq yes "$FEATURE"
+}
+
+test_option_no() {
+    installer_set_yes_no_option "Enable feature?" FEATURE <<<"n" || return 1
+    assert_eq no "$FEATURE"
+}
+
+test_option_eof() {
+    local status
+
+    if installer_set_yes_no_option "Enable feature?" FEATURE </dev/null 2>/dev/null; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 2 "$status" || return 1
+    assert_true test -z "${FEATURE:-}"
+}
+
+test_choose_lua() {
+    installer_choose_config <<<"1" >/dev/null 2>&1 || return 1
+    assert_eq lua "$REPLY"
+}
+
+test_choose_conf() {
+    installer_choose_config <<<"2" >/dev/null 2>&1 || return 1
+    assert_eq conf "$REPLY"
+}
+
+test_choose_invalid_then_conf() {
+    installer_choose_config <<< $'invalid\n2' >/dev/null 2>&1 || return 1
+    assert_eq conf "$REPLY"
+}
+
+test_choose_eof() {
+    local status
+
+    if installer_choose_config </dev/null >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 2 "$status"
+}
+
+# --------------------------------------------------
+# Backup tests
+# --------------------------------------------------
+
+test_backup_file() {
+    new_sandbox || return 1
+
+    printf 'backup test content\n' > "$HOME/example.txt"
+
+    installer_backup_path "$HOME/example.txt" >/dev/null || return 1
+
+    assert_true test -f "$INSTALLER_BACKUP_DIR/files$HOME/example.txt" || return 1
+
+    assert_eq \
+        "backup test content" \
+        "$(cat "$INSTALLER_BACKUP_DIR/files$HOME/example.txt")"
+}
+
+test_backup_directory() {
+    new_sandbox || return 1
+
+    mkdir -p "$HOME/config/nested"
+    printf 'nested data\n' > "$HOME/config/nested/example"
+
+    installer_backup_path "$HOME/config" >/dev/null || return 1
+
+    assert_eq \
+        "nested data" \
+        "$(cat "$INSTALLER_BACKUP_DIR/files$HOME/config/nested/example")"
+}
+
+test_backup_symlinks() {
+    new_sandbox || return 1
+
+    printf 'target\n' > "$HOME/target"
+    ln -s target "$HOME/normal-link"
+    ln -s missing-target "$HOME/dangling-link"
+
+    installer_backup_path "$HOME/normal-link" >/dev/null || return 1
+    installer_backup_path "$HOME/dangling-link" >/dev/null || return 1
+
+    assert_true test -L "$INSTALLER_BACKUP_DIR/files$HOME/normal-link" || return 1
+    assert_true test -L "$INSTALLER_BACKUP_DIR/files$HOME/dangling-link" || return 1
+
+    assert_eq target "$(readlink "$INSTALLER_BACKUP_DIR/files$HOME/normal-link")"
+    assert_eq missing-target "$(readlink "$INSTALLER_BACKUP_DIR/files$HOME/dangling-link")"
+}
+
+test_backup_manifest() {
+    new_sandbox || return 1
+
+    printf 'manifest test\n' > "$HOME/file"
+
+    installer_backup_path "$HOME/file" >/dev/null || return 1
+
+    assert_true test -f "$INSTALLER_BACKUP_DIR/manifest.txt" || return 1
+    assert_true grep -q 'SOURCE=' "$INSTALLER_BACKUP_DIR/manifest.txt"
+}
+
+test_backup_rejects_unsafe_paths() {
+    new_sandbox || return 1
+
+    local unsafe
+
+    for unsafe in \
+        relative/path \
+        / \
+        /tmp/../etc \
+        /tmp/./example \
+        /tmp//example \
+        /tmp/example/
+    do
+        expect_failure installer_backup_path "$unsafe" || return 1
+    done
+}
+
+test_backup_missing_path_is_ignored() {
+    new_sandbox || return 1
+
+    installer_backup_path "$HOME/does-not-exist" >/dev/null || return 1
+
+    assert_true test -z "${INSTALLER_BACKUP_DIR:-}"
+}
+
+test_backup_duplicate_is_rejected() {
+    new_sandbox || return 1
+
+    printf 'original\n' > "$HOME/file"
+
+    installer_backup_path "$HOME/file" >/dev/null || return 1
+
+    expect_failure installer_backup_path "$HOME/file" || return 1
+}
+
+# --------------------------------------------------
+# Restore tests
+# --------------------------------------------------
+
+test_restore_directory() {
+    new_sandbox || return 1
+
+    mkdir -p "$HOME/config/nested"
+    printf 'restore me\n' > "$HOME/config/nested/file"
+
+    installer_backup_path "$HOME/config" >/dev/null || return 1
+    local backup_dir="$INSTALLER_BACKUP_DIR"
+
+    rm -rf "$HOME/config"
+
+    installer_restore_path "$backup_dir" "$HOME/config" >/dev/null || return 1
+
+    assert_eq "restore me" "$(cat "$HOME/config/nested/file")"
+}
+
+test_restore_symlinks() {
+    new_sandbox || return 1
+
+    printf 'target\n' > "$HOME/target"
+    ln -s target "$HOME/normal-link"
+    ln -s absent "$HOME/dangling-link"
+
+    installer_backup_path "$HOME/normal-link" >/dev/null || return 1
+    installer_backup_path "$HOME/dangling-link" >/dev/null || return 1
+
+    local backup_dir="$INSTALLER_BACKUP_DIR"
+
+    rm "$HOME/normal-link" "$HOME/dangling-link"
+
+    installer_restore_path "$backup_dir" "$HOME/normal-link" >/dev/null || return 1
+    installer_restore_path "$backup_dir" "$HOME/dangling-link" >/dev/null || return 1
+
+    assert_true test -L "$HOME/normal-link" || return 1
+    assert_true test -L "$HOME/dangling-link" || return 1
+
+    assert_eq target "$(readlink "$HOME/normal-link")"
+    assert_eq absent "$(readlink "$HOME/dangling-link")"
+}
+
+test_restore_preserves_existing_destination() {
+    new_sandbox || return 1
+
+    printf 'backup version\n' > "$HOME/file"
+
+    installer_backup_path "$HOME/file" >/dev/null || return 1
+    local backup_dir="$INSTALLER_BACKUP_DIR"
+
+    printf 'current version\n' > "$HOME/file"
+
+    expect_failure installer_restore_path "$backup_dir" "$HOME/file" || return 1
+
+    assert_eq "current version" "$(cat "$HOME/file")"
+}
+
+test_restore_rejects_unsafe_paths() {
+    new_sandbox || return 1
+
+    printf 'test\n' > "$HOME/file"
+    installer_backup_path "$HOME/file" >/dev/null || return 1
+
+    local backup_dir="$INSTALLER_BACKUP_DIR"
+    local unsafe
+
+    for unsafe in \
+        relative/path \
+        / \
+        /tmp/../etc \
+        /tmp/./example \
+        /tmp//example \
+        /tmp/example/
+    do
+        expect_failure installer_restore_path "$backup_dir" "$unsafe" || return 1
+    done
+}
+
+test_restore_rejects_external_session() {
+    new_sandbox || return 1
+
+    local forged="$TEST_ROOT/outside/backup-forged"
+
+    mkdir -p "$forged/files$HOME"
+    touch "$forged/manifest.txt"
+    printf 'forged data\n' > "$forged/files$HOME/file"
+
+    expect_failure installer_restore_path "$forged" "$HOME/file"
+}
+
+test_restore_rejects_session_symlink() {
+    new_sandbox || return 1
+
+    printf 'test\n' > "$HOME/file"
+    installer_backup_path "$HOME/file" >/dev/null || return 1
+
+    local backup_dir="$INSTALLER_BACKUP_DIR"
+    local link="$TEST_ROOT/backup-link"
+
+    ln -s "$backup_dir" "$link" || return 1
+
+    expect_failure installer_restore_path "$link" "$HOME/file"
+}
+
+
+# --------------------------------------------------
+# Package planning tests
+# --------------------------------------------------
+
+test_package_collection_deduplicates_and_includes_options() {
+    installer_load_package_manifest || return 1
+
+    HYPRV_BASE_PACKAGES=(alpha shared)
+    HYPRV_DESKTOP_PACKAGES=(beta shared)
+    HYPRV_STARSHIP_PACKAGES=(starship)
+    HYPRV_ROG_PACKAGES=(rog-tool)
+
+    installer_collect_packages yes yes >/dev/null || return 1
+
+    assert_eq 5 "${#INSTALLER_REQUESTED_PACKAGES[@]}" || return 1
+    assert_eq 'alpha shared beta starship rog-tool' "${INSTALLER_REQUESTED_PACKAGES[*]}"
+}
+
+
+test_package_classification_separates_sources() {
+    INSTALLER_REQUESTED_PACKAGES=(
+        installed-test official-test official-via-yay-test aur-test other-test missing-test
+    )
+
+    pacman-conf() {
+        printf 'core\nextra\nmultilib\n'
+    }
+
+    pacman() {
+        case "$1:$2" in
+            -Qq:installed-test) return 0 ;;
+            -Qq:*) return 1 ;;
+            -Si:official-test) return 0 ;;
+            -Si:*)
+                printf "error: package '%s' was not found in sync db\n" "$2"
+                return 1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    yay() {
+        case "$1:$2" in
+            -Si:official-via-yay-test) printf 'Repository : extra\n' ;;
+            -Si:aur-test) printf 'Repository : aur\n' ;;
+            -Si:other-test) printf 'Repository : custom-repo\n' ;;
+            -Si:missing-test)
+                printf ' -> No AUR package found for missing-test\n'
+                return 1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+
+    installer_classify_packages >/dev/null || return 1
+
+    assert_eq 'installed-test' "${INSTALLER_INSTALLED_PACKAGES[*]}" || return 1
+    assert_eq 'official-test official-via-yay-test' "${INSTALLER_SYNC_PACKAGES[*]}" || return 1
+    assert_eq 'aur-test' "${INSTALLER_AUR_PACKAGES[*]}" || return 1
+    assert_eq 'other-test' "${INSTALLER_OTHER_PACKAGES[*]}" || return 1
+    assert_eq 'missing-test' "${INSTALLER_UNAVAILABLE_PACKAGES[*]}" || return 1
+    assert_eq 0 "${#INSTALLER_UNVERIFIED_PACKAGES[@]}"
+}
+
+test_package_plan_rejects_unavailable_package() {
+    installer_load_package_manifest || return 1
+    HYPRV_BASE_PACKAGES=(missing-test)
+    HYPRV_DESKTOP_PACKAGES=()
+    HYPRV_STARSHIP_PACKAGES=()
+    HYPRV_ROG_PACKAGES=()
+
+    pacman() {
+        if [[ "$1" == "-Qq" ]]; then
+            return 1
+        fi
+        printf "error: package '%s' was not found in sync db
+" "$2"
+        return 1
+    }
+
+    yay() {
+        printf " -> No AUR package found for %s
+" "$2"
+        return 1
+    }
+
+    local status
+    if installer_prepare_package_plan no no >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status" || return 1
+    assert_eq "missing-test" "${INSTALLER_UNAVAILABLE_PACKAGES[*]}"
+}
+
+test_package_plan_accepts_all_installed() {
+    installer_load_package_manifest || return 1
+
+    HYPRV_BASE_PACKAGES=(already-installed)
+    HYPRV_DESKTOP_PACKAGES=()
+    HYPRV_STARSHIP_PACKAGES=()
+    HYPRV_ROG_PACKAGES=()
+
+    pacman() {
+        case "$1:$2" in
+            -Qq:already-installed) return 0 ;;
+            *) return 1 ;;
+        esac
+    }
+
+    yay() { return 1; }
+
+    local status
+    if installer_prepare_package_plan no no >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 0 "$status"
+}
+
+
+test_package_plan_rejects_other_repository() {
+    installer_load_package_manifest || return 1
+    HYPRV_BASE_PACKAGES=(custom-repo-test)
+    HYPRV_DESKTOP_PACKAGES=()
+    HYPRV_STARSHIP_PACKAGES=()
+    HYPRV_ROG_PACKAGES=()
+
+    pacman-conf() {
+        printf 'core\nextra\nmultilib\n'
+    }
+
+    pacman() {
+        if [[ "$1" == "-Qq" ]]; then
+            return 1
+        fi
+        printf "error: package '%s' was not found in sync db\n" "$2"
+        return 1
+    }
+
+    yay() {
+        printf 'Repository : custom-repo\n'
+    }
+
+    local status
+    if installer_prepare_package_plan no no >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 2 "$status" || return 1
+    assert_eq 'custom-repo-test' "${INSTALLER_OTHER_PACKAGES[*]}"
+}
+
+test_package_plan_rejects_empty_request() {
+    installer_load_package_manifest || return 1
+
+    HYPRV_BASE_PACKAGES=()
+    HYPRV_DESKTOP_PACKAGES=()
+    HYPRV_STARSHIP_PACKAGES=()
+    HYPRV_ROG_PACKAGES=()
+
+    local status
+    if installer_prepare_package_plan no no >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 2 "$status"
+}
+
+
+test_package_plan_marks_repository_list_failure_unverified() {
+    installer_load_package_manifest || return 1
+    HYPRV_BASE_PACKAGES=(official-repo-test)
+    HYPRV_DESKTOP_PACKAGES=()
+    HYPRV_STARSHIP_PACKAGES=()
+    HYPRV_ROG_PACKAGES=()
+
+    pacman-conf() {
+        printf 'unable to read pacman configuration\n' >&2
+        return 1
+    }
+
+    pacman() {
+        if [[ "$1" == "-Qq" ]]; then
+            return 1
+        fi
+        printf "error: package '%s' was not found in sync db\n" "$2"
+        return 1
+    }
+
+    yay() {
+        printf 'Repository : extra\n'
+    }
+
+    local status
+    if installer_prepare_package_plan no no >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 3 "$status" || return 1
+    assert_eq 'official-repo-test' "${INSTALLER_UNVERIFIED_PACKAGES[*]}" || return 1
+    assert_eq 0 "${#INSTALLER_OTHER_PACKAGES[@]}"
+}
+
+
+# --------------------------------------------------
+# Installer orchestration tests
+# --------------------------------------------------
+
+test_main_runs_package_plan_before_summary_and_confirmation() {
+    TEST_FLOW=""
+    TEST_PLAN_STATUS=0
+
+    installer_init_logging() { INSTALLER_LOG="test.log"; }
+    installer_preflight() { :; }
+    installer_choose_config() { REPLY="lua"; }
+
+    installer_set_yes_no_option() {
+        printf -v "$2" '%s' "no"
+    }
+
+    installer_prepare_package_plan() {
+        TEST_FLOW+="P"
+        return "$TEST_PLAN_STATUS"
+    }
+
+    installer_summary() {
+        TEST_FLOW+="S"
+    }
+
+    installer_prompt_yes_no() {
+        TEST_FLOW+="C"
+        return 0
+    }
+
+    installer_main >/dev/null || return 1
+
+    assert_eq "PSC" "$TEST_FLOW"
+}
+
+test_main_stops_when_package_plan_is_not_ready() {
+    TEST_FLOW=""
+    TEST_PLAN_STATUS=3
+
+    installer_init_logging() { INSTALLER_LOG="test.log"; }
+    installer_preflight() { :; }
+    installer_choose_config() { REPLY="lua"; }
+
+    installer_set_yes_no_option() {
+        printf -v "$2" '%s' "no"
+    }
+
+    installer_prepare_package_plan() {
+        TEST_FLOW+="P"
+        return "$TEST_PLAN_STATUS"
+    }
+
+    installer_summary() {
+        TEST_FLOW+="S"
+    }
+
+    installer_prompt_yes_no() {
+        TEST_FLOW+="C"
+        return 0
+    }
+
+    local status
+    if installer_main >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status" || return 1
+    assert_eq "P" "$TEST_FLOW"
+}
+
+# --------------------------------------------------
+# Run suite
+# --------------------------------------------------
+
+printf '\n============================================\n'
+printf '       HYPRV INSTALLER TEST SUITE\n'
+printf '============================================\n'
+
+test_package_plan_marks_lookup_failures_unverified() {
+    installer_load_package_manifest || return 1
+    HYPRV_BASE_PACKAGES=(network-failure-test)
+    HYPRV_DESKTOP_PACKAGES=()
+    HYPRV_STARSHIP_PACKAGES=()
+    HYPRV_ROG_PACKAGES=()
+
+    pacman() {
+        if [[ "$1" == "-Qq" ]]; then
+            return 1
+        fi
+        printf 'error: failed retrieving file from mirror\n'
+        return 1
+    }
+
+    yay() {
+        printf 'error: network unreachable\n'
+        return 1
+    }
+
+    local status
+    if installer_prepare_package_plan no no >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 3 "$status" || return 1
+    assert_eq "network-failure-test" "${INSTALLER_UNVERIFIED_PACKAGES[*]}" || return 1
+    assert_eq 0 "${#INSTALLER_UNAVAILABLE_PACKAGES[@]}"
+}
+
+run_test test_prompt_yes
+run_test test_prompt_no
+run_test test_prompt_default_yes
+run_test test_prompt_default_no
+run_test test_prompt_invalid_then_yes
+run_test test_prompt_eof
+
+run_test test_option_yes
+run_test test_option_no
+run_test test_option_eof
+
+run_test test_choose_lua
+run_test test_choose_conf
+run_test test_choose_invalid_then_conf
+run_test test_choose_eof
+
+run_test test_backup_file
+run_test test_backup_directory
+run_test test_backup_symlinks
+run_test test_backup_manifest
+run_test test_backup_rejects_unsafe_paths
+run_test test_backup_missing_path_is_ignored
+run_test test_backup_duplicate_is_rejected
+
+run_test test_restore_directory
+run_test test_restore_symlinks
+run_test test_restore_preserves_existing_destination
+run_test test_restore_rejects_unsafe_paths
+run_test test_restore_rejects_external_session
+run_test test_restore_rejects_session_symlink
+
+run_test test_package_collection_deduplicates_and_includes_options
+run_test test_package_classification_separates_sources
+run_test test_package_plan_rejects_unavailable_package
+run_test test_package_plan_accepts_all_installed
+run_test test_package_plan_rejects_other_repository
+run_test test_package_plan_rejects_empty_request
+run_test test_package_plan_marks_lookup_failures_unverified
+run_test test_package_plan_marks_repository_list_failure_unverified
+run_test test_main_runs_package_plan_before_summary_and_confirmation
+run_test test_main_stops_when_package_plan_is_not_ready
+
+printf '\n============================================\n'
+printf 'Passed: %s\n' "$TESTS_PASSED"
+printf 'Failed: %s\n' "$TESTS_FAILED"
+printf '============================================\n'
+
+if (( TESTS_FAILED > 0 )); then
+    exit 1
+fi
+
+exit 0
