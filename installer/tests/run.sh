@@ -637,6 +637,11 @@ test_main_runs_package_plan_before_summary_and_confirmation() {
         return 0
     }
 
+    installer_deployment_plan() {
+        TEST_FLOW+="D"
+        return 0
+    }
+
     installer_set_yes_no_option() {
         printf -v "$2" '%s' "no"
     }
@@ -657,7 +662,44 @@ test_main_runs_package_plan_before_summary_and_confirmation() {
 
     installer_main >/dev/null || return 1
 
-    assert_eq "TPSC" "$TEST_FLOW"
+    assert_eq "TDPSC" "$TEST_FLOW"
+}
+
+test_main_stops_when_deployment_plan_is_not_ready() {
+    TEST_FLOW=""
+
+    installer_init_logging() { INSTALLER_LOG="test.log"; }
+    installer_preflight() { :; }
+    installer_choose_config() { REPLY="lua"; }
+
+    installer_strategy_plan() {
+        TEST_FLOW+="T"
+        return 0
+    }
+
+    installer_deployment_plan() {
+        TEST_FLOW+="D"
+        return 1
+    }
+
+    installer_set_yes_no_option() {
+        printf -v "$2" '%s' "no"
+    }
+
+    installer_prepare_package_plan() {
+        TEST_FLOW+="P"
+        return 0
+    }
+
+    local status
+    if installer_main >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status" || return 1
+    assert_eq "TD" "$TEST_FLOW"
 }
 
 test_main_stops_when_package_plan_is_not_ready() {
@@ -670,6 +712,11 @@ test_main_stops_when_package_plan_is_not_ready() {
 
     installer_strategy_plan() {
         TEST_FLOW+="T"
+        return 0
+    }
+
+    installer_deployment_plan() {
+        TEST_FLOW+="D"
         return 0
     }
 
@@ -699,7 +746,7 @@ test_main_stops_when_package_plan_is_not_ready() {
     fi
 
     assert_eq 1 "$status" || return 1
-    assert_eq "TP" "$TEST_FLOW"
+    assert_eq "TDP" "$TEST_FLOW"
 }
 
 # --------------------------------------------------
@@ -910,6 +957,219 @@ test_strategy_plan_reports_selected_mode() {
     assert_true grep -q "Private settings: preserved" <<<"$output"
 }
 
+
+# --------------------------------------------------
+# Deployment planner tests
+# --------------------------------------------------
+
+test_deployment_manifest_contains_lua_mappings() {
+    local original_root="$REPO_ROOT"
+    local sandbox_root="$TEST_ROOT/deployment-manifest"
+
+    mkdir -p "$sandbox_root/HyprV/hypr/lua"
+    touch "$sandbox_root/HyprV/hypr/hyprland.lua"
+
+    REPO_ROOT="$sandbox_root"
+    INSTALLER_CONFIG_MODE=lua
+
+    installer_load_deployment_manifest || return 1
+
+    REPO_ROOT="$original_root"
+
+    assert_eq 2 "${#INSTALLER_DEPLOYMENT_IDS[@]}" || return 1
+    assert_eq "hyprland-entrypoint" "${INSTALLER_DEPLOYMENT_IDS[0]}" ||
+        return 1
+    assert_eq "lua-modules" "${INSTALLER_DEPLOYMENT_IDS[1]}"
+}
+
+test_deployment_classifies_missing_destination() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    touch "$source"
+
+    local status
+    status="$(installer_deployment_classify "$source" "$HOME/missing")" ||
+        return 1
+
+    assert_eq "MISSING" "$status"
+}
+
+test_deployment_classifies_matching_symlink() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local destination="$HOME/deployment-link"
+
+    touch "$source"
+    ln -s "$source" "$destination"
+
+    local status
+    status="$(installer_deployment_classify "$source" "$destination")" ||
+        return 1
+
+    assert_eq "MATCH" "$status"
+}
+
+test_deployment_classifies_identical_file() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local destination="$HOME/deployment-copy"
+
+    printf 'same content\n' > "$source"
+    cp "$source" "$destination"
+
+    local status
+    status="$(installer_deployment_classify "$source" "$destination")" ||
+        return 1
+
+    assert_eq "IDENTICAL" "$status"
+}
+
+test_deployment_classifies_conflicting_file() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local destination="$HOME/deployment-copy"
+
+    printf 'repository version\n' > "$source"
+    printf 'user version\n' > "$destination"
+
+    local status
+    status="$(installer_deployment_classify "$source" "$destination")" ||
+        return 1
+
+    assert_eq "CONFLICT" "$status"
+}
+
+test_deployment_classifies_dangling_symlink_as_conflict() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local destination="$HOME/deployment-link"
+
+    touch "$source"
+    ln -s "$HOME/nonexistent-target" "$destination"
+
+    local status
+    status="$(installer_deployment_classify "$source" "$destination")" ||
+        return 1
+
+    assert_eq "CONFLICT" "$status"
+}
+
+test_deployment_rejects_symlinked_parent() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local real_parent="$HOME/real-parent"
+    local linked_parent="$HOME/linked-parent"
+
+    touch "$source"
+    mkdir -p "$real_parent"
+    ln -s "$real_parent" "$linked_parent"
+
+    local status
+    status="$(
+        installer_deployment_classify \
+            "$source" "$linked_parent/destination"
+    )" || return 1
+
+    assert_eq "CONFLICT" "$status"
+}
+
+test_deployment_rejects_non_directory_parent() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local parent="$HOME/not-a-directory"
+
+    touch "$source"
+    touch "$parent"
+
+    local status
+    status="$(
+        installer_deployment_classify "$source" "$parent/destination"
+    )" || return 1
+
+    assert_eq "CONFLICT" "$status"
+}
+
+test_deployment_rejects_relative_destination() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    touch "$source"
+
+    local status
+    status="$(
+        installer_deployment_classify "$source" "relative/destination"
+    )" || return 1
+
+    assert_eq "CONFLICT" "$status"
+}
+
+test_deployment_dry_run_does_not_create_destinations() {
+    new_sandbox || return 1
+
+    local original_root="$REPO_ROOT"
+    local sandbox_root="$TEST_ROOT/deployment-read-only"
+    local entrypoint="$sandbox_root/HyprV/hypr/hyprland.lua"
+    local modules="$sandbox_root/HyprV/hypr/lua"
+    local entrypoint_destination="$HOME/.config/hypr/hyprland.lua"
+    local modules_destination="$HOME/.config/hypr/hyprv"
+
+    mkdir -p "$modules"
+    touch "$entrypoint"
+
+    REPO_ROOT="$sandbox_root"
+    INSTALLER_CONFIG_MODE=lua
+
+    installer_deployment_plan >/dev/null || {
+        REPO_ROOT="$original_root"
+        return 1
+    }
+
+    REPO_ROOT="$original_root"
+
+    [[ ! -e "$entrypoint_destination" &&
+       ! -L "$entrypoint_destination" ]] || return 1
+
+    [[ ! -e "$modules_destination" &&
+       ! -L "$modules_destination" ]] || return 1
+}
+
+test_deployment_rejects_missing_source() {
+    new_sandbox || return 1
+
+    expect_failure installer_deployment_classify \
+        "$TEST_ROOT/nonexistent-source" "$HOME/destination"
+}
+
+test_deployment_defers_conf_strategy() {
+    INSTALLER_CONFIG_MODE=conf
+
+    local output
+    output="$(installer_deployment_plan)" || return 1
+
+    assert_true grep -q "CONF deployment mappings are not defined" \
+        <<<"$output"
+}
+
+run_test test_deployment_manifest_contains_lua_mappings
+run_test test_deployment_classifies_missing_destination
+run_test test_deployment_classifies_matching_symlink
+run_test test_deployment_classifies_identical_file
+run_test test_deployment_classifies_conflicting_file
+run_test test_deployment_classifies_dangling_symlink_as_conflict
+run_test test_deployment_rejects_symlinked_parent
+run_test test_deployment_rejects_non_directory_parent
+run_test test_deployment_rejects_relative_destination
+run_test test_deployment_dry_run_does_not_create_destinations
+run_test test_deployment_rejects_missing_source
+run_test test_deployment_defers_conf_strategy
+
 run_test test_lua_strategy_validates_repository
 run_test test_lua_strategy_rejects_missing_module
 run_test test_lua_strategy_requires_selected_nvidia_module
@@ -993,6 +1253,7 @@ run_test test_package_plan_rejects_other_repository
 run_test test_package_plan_rejects_empty_request
 run_test test_package_plan_marks_lookup_failures_unverified
 run_test test_package_plan_marks_repository_list_failure_unverified
+run_test test_main_stops_when_deployment_plan_is_not_ready
 run_test test_main_runs_package_plan_before_summary_and_confirmation
 run_test test_main_stops_when_package_plan_is_not_ready
 
