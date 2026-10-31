@@ -24,6 +24,7 @@ source "$INSTALLER_DIR/core/restore.sh"
 source "$INSTALLER_DIR/core/ui.sh"
 source "$INSTALLER_DIR/packages/manager.sh"
 source "$INSTALLER_DIR/strategies/manager.sh"
+source "$INSTALLER_DIR/deployment/planner.sh"
 
 installer_main() {
     printf '\n'
@@ -70,7 +71,17 @@ installer_main() {
         return 1
     fi
 
-    # Phase 5: Build and validate the package plan.
+    # Phase 5: Review the intended configuration deployment.
+    #
+    # This is a read-only plan. Actual file deployment is a later milestone.
+    if installer_deployment_plan; then
+        :
+    else
+        printf '\n[ERROR] Configuration deployment plan is not safe to continue.\n' >&2
+        return 1
+    fi
+
+    # Phase 6: Build and validate the package plan.
     local package_plan_status
 
     if installer_prepare_package_plan \
@@ -99,10 +110,10 @@ installer_main() {
         return 1
     fi
 
-    # Phase 5: Display the combined configuration summary.
+    # Phase 7: Display the combined configuration summary.
     installer_summary
 
-    # Phase 6: Require explicit confirmation.
+    # Phase 8: Require explicit confirmation.
     if installer_prompt_yes_no "Does this plan look correct?" n; then
         printf '\n[OK] Plan confirmed.\n'
     else
