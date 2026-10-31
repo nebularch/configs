@@ -19,6 +19,7 @@ INSTALLER_DIR="$(
 
 # Load the real entry point without executing the installer.
 source "$INSTALLER_DIR/main.sh"
+source "$INSTALLER_DIR/deployment/executor.sh"
 
 TEST_ROOT="$(mktemp -d)" || exit 1
 trap 'rm -rf -- "$TEST_ROOT"' EXIT
@@ -1156,6 +1157,282 @@ test_deployment_defers_conf_strategy() {
     assert_true grep -q "CONF deployment mappings are not defined" \
         <<<"$output"
 }
+
+
+# --------------------------------------------------
+# Deployment executor tests
+# --------------------------------------------------
+
+setup_executor_fixture() {
+    new_sandbox || return 1
+
+    EXECUTOR_REPO="$TEST_ROOT/executor-repo"
+    EXECUTOR_SOURCE_ONE="HyprV/hypr/hyprland.lua"
+    EXECUTOR_SOURCE_TWO="HyprV/hypr/lua/init.lua"
+    EXECUTOR_DEST_ONE="$HOME/.config/hypr/hyprland.lua"
+    EXECUTOR_DEST_TWO="$HOME/.config/hypr/hyprv"
+
+    mkdir -p "$EXECUTOR_REPO/HyprV/hypr/lua" \
+        "$HOME/.config/hypr" || return 1
+
+    printf 'sandbox entrypoint\n' \
+        > "$EXECUTOR_REPO/$EXECUTOR_SOURCE_ONE"
+    printf 'sandbox module\n' \
+        > "$EXECUTOR_REPO/$EXECUTOR_SOURCE_TWO"
+
+    REPO_ROOT="$EXECUTOR_REPO"
+    INSTALLER_CONFIG_MODE=lua
+
+    installer_load_deployment_manifest() {
+        INSTALLER_DEPLOYMENT_IDS=(entrypoint modules)
+        INSTALLER_DEPLOYMENT_SOURCES=(
+            "$EXECUTOR_SOURCE_ONE"
+            "$EXECUTOR_SOURCE_TWO"
+        )
+        INSTALLER_DEPLOYMENT_DESTINATIONS=(
+            "$EXECUTOR_DEST_ONE"
+            "$EXECUTOR_DEST_TWO"
+        )
+        INSTALLER_DEPLOYMENT_LABELS=("Entrypoint" "Lua modules")
+    }
+}
+
+test_deployment_executor_creates_missing_symlinks() {
+    setup_executor_fixture || return 1
+
+    installer_deployment_execute || return 1
+
+    assert_true test -L "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test -L "$EXECUTOR_DEST_TWO" || return 1
+
+    assert_eq \
+        "$EXECUTOR_REPO/$EXECUTOR_SOURCE_ONE" \
+        "$(readlink -- "$EXECUTOR_DEST_ONE")" || return 1
+
+    assert_eq \
+        "$EXECUTOR_REPO/$EXECUTOR_SOURCE_TWO" \
+        "$(readlink -- "$EXECUTOR_DEST_TWO")"
+}
+
+test_deployment_executor_skips_matching_symlink() {
+    setup_executor_fixture || return 1
+
+    ln -s "$EXECUTOR_REPO/$EXECUTOR_SOURCE_ONE" \
+        "$EXECUTOR_DEST_ONE"
+
+    installer_deployment_execute || return 1
+
+    assert_true test -L "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test -L "$EXECUTOR_DEST_TWO"
+}
+
+test_deployment_executor_preserves_identical_file() {
+    setup_executor_fixture || return 1
+
+    cp "$EXECUTOR_REPO/$EXECUTOR_SOURCE_ONE" "$EXECUTOR_DEST_ONE"
+
+    local before
+    before=$(sha256sum "$EXECUTOR_DEST_ONE") || return 1
+
+    installer_deployment_execute || return 1
+
+    local after
+    after=$(sha256sum "$EXECUTOR_DEST_ONE") || return 1
+
+    assert_eq "$before" "$after" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test -L "$EXECUTOR_DEST_TWO"
+}
+
+test_deployment_executor_blocks_conflict_before_changes() {
+    setup_executor_fixture || return 1
+
+    printf 'user-owned content\n' > "$EXECUTOR_DEST_TWO"
+
+    expect_failure installer_deployment_execute || return 1
+
+    assert_true test ! -e "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE" || return 1
+    assert_eq "user-owned content" "$(cat "$EXECUTOR_DEST_TWO")"
+}
+
+test_deployment_executor_rejects_duplicate_destinations() {
+    setup_executor_fixture || return 1
+
+    installer_load_deployment_manifest() {
+        INSTALLER_DEPLOYMENT_IDS=(first second)
+        INSTALLER_DEPLOYMENT_SOURCES=(
+            "$EXECUTOR_SOURCE_ONE"
+            "$EXECUTOR_SOURCE_TWO"
+        )
+        INSTALLER_DEPLOYMENT_DESTINATIONS=(
+            "$EXECUTOR_DEST_ONE"
+            "$EXECUTOR_DEST_ONE"
+        )
+        INSTALLER_DEPLOYMENT_LABELS=("First" "Second")
+    }
+
+    expect_failure installer_deployment_execute || return 1
+
+    assert_true test ! -e "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE"
+}
+
+test_deployment_executor_rolls_back_after_failure() {
+    setup_executor_fixture || return 1
+
+    # Keep the real helper and inject a failure on the second call.
+    eval "$(
+        declare -f installer_deployment_create_link |
+        sed '1s/installer_deployment_create_link/installer_deployment_create_link_original/'
+    )" || return 1
+
+    local attempts=0
+
+    installer_deployment_create_link() {
+        ((attempts += 1))
+
+        if (( attempts == 2 )); then
+            INSTALLER_DEPLOYMENT_LAST_CREATED_PATH=""
+            INSTALLER_DEPLOYMENT_LAST_CREATED_TARGET=""
+            printf '[TEST] Injected second-link failure.\n' >&2
+            return 1
+        fi
+
+        installer_deployment_create_link_original "$@"
+    }
+
+    expect_failure installer_deployment_execute || return 1
+
+    assert_true test ! -e "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -e "$EXECUTOR_DEST_TWO" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_TWO" || return 1
+
+    assert_eq 0 "${#INSTALLER_DEPLOYMENT_CREATED_PATHS[@]}"
+}
+
+test_deployment_rollback_preserves_changed_symlink() {
+    new_sandbox || return 1
+
+    local original="$HOME/original-target"
+    local replacement="$HOME/replacement-target"
+    local destination="$HOME/deployment-link"
+
+    touch "$original" "$replacement" || return 1
+    ln -s "$replacement" "$destination" || return 1
+
+    INSTALLER_DEPLOYMENT_CREATED_PATHS=("$destination")
+    INSTALLER_DEPLOYMENT_CREATED_TARGETS=("$original")
+
+    expect_failure installer_deployment_rollback || return 1
+
+    assert_true test -L "$destination" || return 1
+    assert_eq "$replacement" "$(readlink -- "$destination")" || return 1
+    assert_eq 1 "${#INSTALLER_DEPLOYMENT_CREATED_PATHS[@]}" || return 1
+
+    # Restore the expected target and retry rollback.
+    ln -sfn -- "$original" "$destination" || return 1
+
+    installer_deployment_rollback || return 1
+
+    assert_true test ! -e "$destination" || return 1
+    assert_true test ! -L "$destination" || return 1
+    assert_eq 0 "${#INSTALLER_DEPLOYMENT_CREATED_PATHS[@]}"
+}
+
+test_deployment_executor_rejects_missing_repo_root() {
+    setup_executor_fixture || return 1
+
+    unset REPO_ROOT
+
+    local status
+    if installer_deployment_execute >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status" || return 1
+    assert_true test ! -e "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -e "$EXECUTOR_DEST_TWO" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_TWO"
+}
+
+test_deployment_executor_preserves_unresolved_rollback_records() {
+    setup_executor_fixture || return 1
+
+    local pending="$HOME/pending-deployment-link"
+    local expected="$HOME/expected-deployment-target"
+
+    touch "$expected" || return 1
+    ln -s "$expected" "$pending" || return 1
+
+    INSTALLER_DEPLOYMENT_CREATED_PATHS=("$pending")
+    INSTALLER_DEPLOYMENT_CREATED_TARGETS=("$expected")
+
+    expect_failure installer_deployment_execute || return 1
+
+    assert_true test -L "$pending" || return 1
+    assert_eq "$expected" "$(readlink -- "$pending")" || return 1
+    assert_eq 1 "${#INSTALLER_DEPLOYMENT_CREATED_PATHS[@]}" || return 1
+    assert_eq 1 "${#INSTALLER_DEPLOYMENT_CREATED_TARGETS[@]}" || return 1
+    assert_eq "$pending" "${INSTALLER_DEPLOYMENT_CREATED_PATHS[0]}" || return 1
+    assert_eq "$expected" "${INSTALLER_DEPLOYMENT_CREATED_TARGETS[0]}" || return 1
+
+    assert_true test ! -e "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE"
+}
+
+test_deployment_rollback_accepts_already_absent_link() {
+    new_sandbox || return 1
+
+    local destination="$HOME/already-removed-link"
+    local expected="$HOME/original-target"
+
+    touch "$expected" || return 1
+
+    INSTALLER_DEPLOYMENT_CREATED_PATHS=("$destination")
+    INSTALLER_DEPLOYMENT_CREATED_TARGETS=("$expected")
+
+    installer_deployment_rollback || return 1
+
+    assert_eq 0 "${#INSTALLER_DEPLOYMENT_CREATED_PATHS[@]}" || return 1
+    assert_eq 0 "${#INSTALLER_DEPLOYMENT_CREATED_TARGETS[@]}" || return 1
+    assert_true test ! -e "$destination" || return 1
+    assert_true test ! -L "$destination"
+}
+
+test_deployment_executor_defers_conf_without_changes() {
+    setup_executor_fixture || return 1
+
+    INSTALLER_CONFIG_MODE=conf
+
+    installer_load_deployment_manifest() {
+        INSTALLER_DEPLOYMENT_IDS=()
+        INSTALLER_DEPLOYMENT_SOURCES=()
+        INSTALLER_DEPLOYMENT_DESTINATIONS=()
+        INSTALLER_DEPLOYMENT_LABELS=()
+    }
+
+    installer_deployment_execute || return 1
+
+    assert_true test ! -e "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE"
+}
+
+run_test test_deployment_executor_creates_missing_symlinks
+run_test test_deployment_executor_skips_matching_symlink
+run_test test_deployment_executor_preserves_identical_file
+run_test test_deployment_executor_blocks_conflict_before_changes
+run_test test_deployment_executor_rejects_duplicate_destinations
+run_test test_deployment_executor_rolls_back_after_failure
+run_test test_deployment_rollback_preserves_changed_symlink
+run_test test_deployment_executor_defers_conf_without_changes
+run_test test_deployment_executor_rejects_missing_repo_root
+run_test test_deployment_executor_preserves_unresolved_rollback_records
+run_test test_deployment_rollback_accepts_already_absent_link
 
 run_test test_deployment_manifest_contains_lua_mappings
 run_test test_deployment_classifies_missing_destination
