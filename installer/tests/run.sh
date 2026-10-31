@@ -632,6 +632,11 @@ test_main_runs_package_plan_before_summary_and_confirmation() {
     installer_preflight() { :; }
     installer_choose_config() { REPLY="lua"; }
 
+    installer_strategy_plan() {
+        TEST_FLOW+="T"
+        return 0
+    }
+
     installer_set_yes_no_option() {
         printf -v "$2" '%s' "no"
     }
@@ -652,7 +657,7 @@ test_main_runs_package_plan_before_summary_and_confirmation() {
 
     installer_main >/dev/null || return 1
 
-    assert_eq "PSC" "$TEST_FLOW"
+    assert_eq "TPSC" "$TEST_FLOW"
 }
 
 test_main_stops_when_package_plan_is_not_ready() {
@@ -662,6 +667,11 @@ test_main_stops_when_package_plan_is_not_ready() {
     installer_init_logging() { INSTALLER_LOG="test.log"; }
     installer_preflight() { :; }
     installer_choose_config() { REPLY="lua"; }
+
+    installer_strategy_plan() {
+        TEST_FLOW+="T"
+        return 0
+    }
 
     installer_set_yes_no_option() {
         printf -v "$2" '%s' "no"
@@ -689,7 +699,7 @@ test_main_stops_when_package_plan_is_not_ready() {
     fi
 
     assert_eq 1 "$status" || return 1
-    assert_eq "P" "$TEST_FLOW"
+    assert_eq "TP" "$TEST_FLOW"
 }
 
 # --------------------------------------------------
@@ -731,6 +741,218 @@ test_package_plan_marks_lookup_failures_unverified() {
     assert_eq "network-failure-test" "${INSTALLER_UNVERIFIED_PACKAGES[*]}" || return 1
     assert_eq 0 "${#INSTALLER_UNAVAILABLE_PACKAGES[@]}"
 }
+
+
+# --------------------------------------------------
+# Configuration strategy tests
+# --------------------------------------------------
+
+strategy_make_lua_fixture() {
+    local root="$1"
+    local file
+
+    local -a files=(
+        HyprV/hypr/hyprland.lua
+        HyprV/hypr/lua/init.lua
+        HyprV/hypr/lua/settings.lua
+        HyprV/hypr/lua/environment.lua
+        HyprV/hypr/lua/monitors.lua
+        HyprV/hypr/lua/input.lua
+        HyprV/hypr/lua/animations.lua
+        HyprV/hypr/lua/layouts.lua
+        HyprV/hypr/lua/windowrules.lua
+        HyprV/hypr/lua/gestures.lua
+        HyprV/hypr/lua/keybinds.lua
+        HyprV/hypr/lua/media.lua
+        HyprV/hypr/lua/autostart.lua
+    )
+
+    for file in "${files[@]}"; do
+        mkdir -p "$root/$(dirname "$file")"
+        : > "$root/$file"
+    done
+}
+
+strategy_make_conf_fixture() {
+    local root="$1"
+    local file
+
+    local -a files=(
+        HyprV/hypr/hyprland.conf
+        HyprV/hypr/env_var.conf
+        HyprV/hypr/media-binds.conf
+        HyprV/hyprv_util
+        HyprV/hypr/xdg-portal-hyprland
+    )
+
+    for file in "${files[@]}"; do
+        mkdir -p "$root/$(dirname "$file")"
+        : > "$root/$file"
+    done
+}
+
+test_lua_strategy_validates_repository() {
+    INSTALLER_CONFIG_MODE=lua
+    INSTALLER_ENABLE_NVIDIA=no
+    INSTALLER_ENABLE_ROG=no
+
+    installer_strategy_validate >/dev/null || return 1
+    assert_eq "Lua" "$INSTALLER_STRATEGY_LABEL"
+}
+
+test_lua_strategy_rejects_missing_module() {
+    local original_root="$REPO_ROOT"
+    REPO_ROOT="$TEST_ROOT/lua-missing"
+
+    strategy_make_lua_fixture "$REPO_ROOT"
+    rm -f "$REPO_ROOT/HyprV/hypr/lua/gestures.lua"
+
+    INSTALLER_CONFIG_MODE=lua
+    INSTALLER_ENABLE_NVIDIA=no
+    INSTALLER_ENABLE_ROG=no
+
+    if installer_strategy_validate >/dev/null 2>&1; then
+        REPO_ROOT="$original_root"
+        return 1
+    fi
+
+    REPO_ROOT="$original_root"
+    return 0
+}
+
+test_lua_strategy_requires_selected_nvidia_module() {
+    local original_root="$REPO_ROOT"
+    REPO_ROOT="$TEST_ROOT/lua-nvidia"
+
+    strategy_make_lua_fixture "$REPO_ROOT"
+
+    INSTALLER_CONFIG_MODE=lua
+    INSTALLER_ENABLE_NVIDIA=yes
+    INSTALLER_ENABLE_ROG=no
+
+    if installer_strategy_validate >/dev/null 2>&1; then
+        REPO_ROOT="$original_root"
+        return 1
+    fi
+
+    REPO_ROOT="$original_root"
+    return 0
+}
+
+test_conf_strategy_validates_repository() {
+    INSTALLER_CONFIG_MODE=conf
+    INSTALLER_ENABLE_NVIDIA=no
+    INSTALLER_ENABLE_ROG=no
+
+    installer_strategy_validate >/dev/null || return 1
+    assert_eq "CONF" "$INSTALLER_STRATEGY_LABEL"
+}
+
+test_conf_strategy_rejects_missing_helper() {
+    local original_root="$REPO_ROOT"
+    REPO_ROOT="$TEST_ROOT/conf-missing"
+
+    strategy_make_conf_fixture "$REPO_ROOT"
+    rm -f "$REPO_ROOT/HyprV/hyprv_util"
+
+    INSTALLER_CONFIG_MODE=conf
+    INSTALLER_ENABLE_NVIDIA=no
+    INSTALLER_ENABLE_ROG=no
+
+    if installer_strategy_validate >/dev/null 2>&1; then
+        REPO_ROOT="$original_root"
+        return 1
+    fi
+
+    REPO_ROOT="$original_root"
+    return 0
+}
+
+test_conf_strategy_requires_selected_rog_file() {
+    local original_root="$REPO_ROOT"
+    REPO_ROOT="$TEST_ROOT/conf-rog"
+
+    strategy_make_conf_fixture "$REPO_ROOT"
+
+    INSTALLER_CONFIG_MODE=conf
+    INSTALLER_ENABLE_NVIDIA=no
+    INSTALLER_ENABLE_ROG=yes
+
+    if installer_strategy_validate >/dev/null 2>&1; then
+        REPO_ROOT="$original_root"
+        return 1
+    fi
+
+    REPO_ROOT="$original_root"
+    return 0
+}
+
+test_strategy_dispatch_rejects_unknown_mode() {
+    INSTALLER_CONFIG_MODE=unknown
+
+    if installer_strategy_validate >/dev/null 2>&1; then
+        return 1
+    fi
+
+    return 0
+}
+
+test_strategy_plan_reports_selected_mode() {
+    INSTALLER_CONFIG_MODE=lua
+    INSTALLER_ENABLE_NVIDIA=no
+    INSTALLER_ENABLE_ROG=no
+
+    local output
+    output="$(installer_strategy_plan)" || return 1
+
+    assert_true grep -q "Configuration strategy: Lua" <<<"$output" ||
+        return 1
+    assert_true grep -q "Private settings: preserved" <<<"$output"
+}
+
+run_test test_lua_strategy_validates_repository
+run_test test_lua_strategy_rejects_missing_module
+run_test test_lua_strategy_requires_selected_nvidia_module
+run_test test_conf_strategy_validates_repository
+run_test test_conf_strategy_rejects_missing_helper
+run_test test_conf_strategy_requires_selected_rog_file
+run_test test_strategy_dispatch_rejects_unknown_mode
+run_test test_strategy_plan_reports_selected_mode
+
+
+test_main_stops_when_strategy_is_not_ready() {
+    TEST_FLOW=""
+
+    installer_init_logging() { INSTALLER_LOG="test.log"; }
+    installer_preflight() { :; }
+    installer_choose_config() { REPLY="lua"; }
+
+    installer_set_yes_no_option() {
+        printf -v "$2" '%s' "no"
+    }
+
+    installer_strategy_plan() {
+        TEST_FLOW+="T"
+        return 1
+    }
+
+    installer_prepare_package_plan() {
+        TEST_FLOW+="P"
+        return 0
+    }
+
+    local status
+    if installer_main >/dev/null 2>&1; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status" || return 1
+    assert_eq "T" "$TEST_FLOW"
+}
+
+run_test test_main_stops_when_strategy_is_not_ready
 
 run_test test_prompt_yes
 run_test test_prompt_no
