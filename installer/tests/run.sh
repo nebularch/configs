@@ -983,6 +983,25 @@ test_deployment_manifest_contains_lua_mappings() {
     assert_eq "lua-modules" "${INSTALLER_DEPLOYMENT_IDS[1]}"
 }
 
+test_deployment_classifies_missing_parent_as_conflict() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local parent="$HOME/missing-parent"
+    local destination="$parent/deployment-link"
+
+    touch "$source" || return 1
+
+    local status
+    status="$(
+        installer_deployment_classify "$source" "$destination"
+    )" || return 1
+
+    assert_eq "CONFLICT" "$status" || return 1
+    assert_true test ! -e "$parent" || return 1
+    assert_true test ! -L "$parent"
+}
+
 test_deployment_classifies_missing_destination() {
     new_sandbox || return 1
 
@@ -1151,7 +1170,7 @@ test_deployment_dry_run_does_not_create_destinations() {
     local entrypoint_destination="$HOME/.config/hypr/hyprland.lua"
     local modules_destination="$HOME/.config/hypr/hyprv"
 
-    mkdir -p "$modules"
+    mkdir -p "$modules" "$HOME/.config/hypr"
     touch "$entrypoint"
 
     REPO_ROOT="$sandbox_root"
@@ -1548,6 +1567,7 @@ run_test test_deployment_rollback_accepts_already_absent_link
 run_test test_deployment_manifest_contains_lua_mappings
 run_test test_deployment_classifies_missing_destination
 run_test test_deployment_classifies_matching_symlink
+run_test test_deployment_classifies_missing_parent_as_conflict
 run_test test_deployment_classifies_identical_file
 run_test test_deployment_classifies_conflicting_file
 run_test test_deployment_classifies_dangling_symlink_as_conflict
