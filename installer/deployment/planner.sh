@@ -27,6 +27,10 @@ installer_deployment_parent_is_safe() {
     [[ "$destination" == /* ]] || return 1
     [[ "$destination" != "/" && "$destination" != */ ]] || return 1
 
+    # Reject line-control characters before parsing the path.
+    [[ "$destination" != *$'\n'* ]] || return 1
+    [[ "$destination" != *$'\r'* ]] || return 1
+
     IFS='/' read -r -a components <<< "$destination"
 
     last_index=$((${#components[@]} - 1))
