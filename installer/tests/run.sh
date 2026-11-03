@@ -1111,6 +1111,36 @@ test_deployment_rejects_relative_destination() {
     assert_eq "CONFLICT" "$status"
 }
 
+test_deployment_rejects_newline_destination() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local destination="$TEST_ROOT/line"$'\n'"break"
+    touch "$source"
+
+    local status
+    status="$(
+        installer_deployment_classify "$source" "$destination"
+    )" || return 1
+
+    assert_eq "CONFLICT" "$status"
+}
+
+test_deployment_rejects_carriage_return_destination() {
+    new_sandbox || return 1
+
+    local source="$TEST_ROOT/deployment-source"
+    local destination="$TEST_ROOT/carriage"$'\r'"return"
+    touch "$source"
+
+    local status
+    status="$(
+        installer_deployment_classify "$source" "$destination"
+    )" || return 1
+
+    assert_eq "CONFLICT" "$status"
+}
+
 test_deployment_dry_run_does_not_create_destinations() {
     new_sandbox || return 1
 
@@ -1278,6 +1308,50 @@ test_deployment_executor_rejects_duplicate_destinations() {
     assert_true test ! -L "$EXECUTOR_DEST_ONE"
 }
 
+test_deployment_executor_rolls_back_when_stage_cleanup_fails() {
+    setup_executor_fixture || return 1
+
+    local output="$TEST_ROOT/stage-cleanup-failure.log"
+    local status
+
+    TEST_STAGE_CLEANUP_PATH=""
+
+    # Inject a cleanup failure while recording the staging directory.
+    installer_deployment_cleanup_stage() {
+        TEST_STAGE_CLEANUP_PATH=$1
+        printf '[TEST] Injected staging cleanup failure.\n' >&2
+        return 1
+    }
+
+    if installer_deployment_execute > /dev/null 2>"$output"; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status" || return 1
+    assert_true grep -Fq \
+        '[DEPLOY] WARNING: Could not clean staging directory:' \
+        "$output" || return 1
+
+    # The newly created destination must have been rolled back.
+    assert_true test ! -e "$EXECUTOR_DEST_ONE" || return 1
+    assert_true test ! -L "$EXECUTOR_DEST_ONE" || return 1
+
+    # The failed cleanup must leave an identifiable staging directory.
+    assert_true test -n "$TEST_STAGE_CLEANUP_PATH" || return 1
+    assert_true test -d "$TEST_STAGE_CLEANUP_PATH" || return 1
+    assert_eq 0 "$(find "$TEST_STAGE_CLEANUP_PATH" -mindepth 1 -maxdepth 1 | wc -l)" || return 1
+
+    # Rollback should have cleared its tracking records.
+    assert_eq 0 "${#INSTALLER_DEPLOYMENT_CREATED_PATHS[@]}" || return 1
+    assert_eq 0 "${#INSTALLER_DEPLOYMENT_CREATED_TARGETS[@]}" || return 1
+
+    # Remove only the empty test staging directory.
+    rmdir -- "$TEST_STAGE_CLEANUP_PATH" || return 1
+    unset TEST_STAGE_CLEANUP_PATH
+}
+
 test_deployment_executor_rolls_back_after_failure() {
     setup_executor_fixture || return 1
 
@@ -1385,6 +1459,41 @@ test_deployment_executor_preserves_unresolved_rollback_records() {
     assert_true test ! -L "$EXECUTOR_DEST_ONE"
 }
 
+test_deployment_rollback_rejects_mismatched_tracking_arrays() {
+    new_sandbox || return 1
+
+    local destination="$HOME/protected-link"
+    local expected="$HOME/original-target"
+    local output="$TEST_ROOT/rollback-mismatch.log"
+    local status
+
+    touch "$expected" || return 1
+    ln -s "$expected" "$destination" || return 1
+
+    INSTALLER_DEPLOYMENT_CREATED_PATHS=("$destination")
+    INSTALLER_DEPLOYMENT_CREATED_TARGETS=()
+
+    if installer_deployment_rollback > /dev/null 2>"$output"; then
+        status=0
+    else
+        status=$?
+    fi
+
+    assert_eq 1 "$status" || return 1
+    assert_true grep -Fq \
+        '[ROLLBACK] ERROR: Tracking arrays have inconsistent lengths.' \
+        "$output" || return 1
+
+    # The inconsistent records must remain untouched for inspection.
+    assert_eq 1 "${#INSTALLER_DEPLOYMENT_CREATED_PATHS[@]}" || return 1
+    assert_eq 0 "${#INSTALLER_DEPLOYMENT_CREATED_TARGETS[@]}" || return 1
+    assert_eq "$destination" "${INSTALLER_DEPLOYMENT_CREATED_PATHS[0]}" || return 1
+
+    # Rollback must not touch filesystem paths when tracking is invalid.
+    assert_true test -L "$destination" || return 1
+    assert_eq "$expected" "$(readlink -- "$destination")"
+}
+
 test_deployment_rollback_accepts_already_absent_link() {
     new_sandbox || return 1
 
@@ -1427,11 +1536,13 @@ run_test test_deployment_executor_skips_matching_symlink
 run_test test_deployment_executor_preserves_identical_file
 run_test test_deployment_executor_blocks_conflict_before_changes
 run_test test_deployment_executor_rejects_duplicate_destinations
+run_test test_deployment_executor_rolls_back_when_stage_cleanup_fails
 run_test test_deployment_executor_rolls_back_after_failure
 run_test test_deployment_rollback_preserves_changed_symlink
 run_test test_deployment_executor_defers_conf_without_changes
 run_test test_deployment_executor_rejects_missing_repo_root
 run_test test_deployment_executor_preserves_unresolved_rollback_records
+run_test test_deployment_rollback_rejects_mismatched_tracking_arrays
 run_test test_deployment_rollback_accepts_already_absent_link
 
 run_test test_deployment_manifest_contains_lua_mappings
@@ -1443,6 +1554,8 @@ run_test test_deployment_classifies_dangling_symlink_as_conflict
 run_test test_deployment_rejects_symlinked_parent
 run_test test_deployment_rejects_non_directory_parent
 run_test test_deployment_rejects_relative_destination
+run_test test_deployment_rejects_newline_destination
+run_test test_deployment_rejects_carriage_return_destination
 run_test test_deployment_dry_run_does_not_create_destinations
 run_test test_deployment_rejects_missing_source
 run_test test_deployment_defers_conf_strategy
