@@ -66,7 +66,7 @@ installer_deployment_parent_is_safe() {
 #   MISSING    Destination does not exist.
 #   MATCH      Destination symlink resolves to the intended source.
 #   IDENTICAL  Existing regular file has identical content.
-#   CONFLICT  Existing destination differs or has an unsafe type.
+#   CONFLICT  Existing destination differs or destination path is unsafe/unavailable.
 #
 # Return code:
 #   0 - Classification completed.
@@ -76,6 +76,7 @@ installer_deployment_classify() {
     local destination="$2"
     local resolved_source
     local resolved_destination
+    local destination_parent
 
     if [[ ! -e "$source" && ! -L "$source" ]]; then
         printf '[ERROR] Deployment source is missing: %s\n' "$source" >&2
@@ -88,6 +89,15 @@ installer_deployment_classify() {
     }
 
     if ! installer_deployment_parent_is_safe "$destination"; then
+        printf 'CONFLICT\n'
+        return 0
+    fi
+
+    destination_parent="$(dirname -- "$destination")" || return 1
+
+    if [[ ! -d "$destination_parent" ]]; then
+        printf '[ERROR] Deployment destination parent does not exist: %s\n' \
+            "$destination_parent" >&2
         printf 'CONFLICT\n'
         return 0
     fi
