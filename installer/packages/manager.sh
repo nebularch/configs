@@ -281,7 +281,7 @@ installer_show_package_plan() {
         "${INSTALLER_UNVERIFIED_PACKAGES[@]}"
 
     local pending_count
-    pending_count=$(( 
+    pending_count=$((
         ${#INSTALLER_SYNC_PACKAGES[@]} +
         ${#INSTALLER_AUR_PACKAGES[@]} +
         ${#INSTALLER_OTHER_PACKAGES[@]}
